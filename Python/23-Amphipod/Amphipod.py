@@ -40,6 +40,9 @@ class OpenList:
 	def is_empty(self):
 		return len(self.list) == 0
 
+	def length(self):
+		return len(self.list)
+
 	def push(self, node):
 		heapq.heappush(self.list, node)
 
@@ -53,7 +56,7 @@ class OpenList:
 
 def read_file(name):
 	file = open(name)
-	return [line.strip() for line in file.readlines()]
+	return list(file.readlines())
 
 
 def parse_puzzle(lines):
@@ -66,16 +69,21 @@ def parse_puzzle(lines):
 	#
 	# Thus the puzzle solution is:
 	#   "AABBCCDD..........."
-	return (lines[3][1] + lines[2][3] + lines[3][3] + lines[2][5] + lines[3][5] +
-	        lines[2][7] + lines[3][7] + lines[2][9] + lines[1][1:-1])
+	pos = []
+	for col in range(3, 10, 2):
+		for row in range(1 + room_size, 1, -1):
+			pos.append(lines[row][col])
+	pos.extend([c for c in lines[1][1:12]])
+	return ''.join(pos)
 
 
 def pretty_print(pos):
 	# Prints a position in the format shown in the puzzle description. 
 	print("#############")
-	print(f"#{pos[8:]}#")
-	print(f"###{pos[1]}#{pos[3]}#{pos[5]}#{pos[7]}###")
-	print(f"  #{pos[0]}#{pos[2]}#{pos[4]}#{pos[6]}#")
+	print(f"#{pos[hall_start:]}#")
+	s = room_size
+	for c in range(s - 1, -1, -1):
+		print(f"  #{pos[c]}#{pos[c + s]}#{pos[c + s * 2]}#{pos[c + s * 3]}#")
 	print("  #########")
 
 
@@ -88,7 +96,7 @@ def get_path(node):
 	return list(reversed(path))
 
 
-def find_path_astar(start, end):
+def find_path_astar(start, end, h_cost):
 	# Finds the path from start to end.
 	nodes = {}
 	open_list = OpenList()
@@ -134,8 +142,9 @@ def find_path_astar(start, end):
 	return None, inf
 
 
-def h_cost(pos, target_pos):
+def h_cost_2(pos, target_pos):
 	# Returns an estimated cost to get from pos to target_pos.
+	assert (room_size == 2)
 	cost = 0
 	for pod in ['A', 'B', 'C', 'D']:
 		cell1 = pos.index(pod)
@@ -144,33 +153,67 @@ def h_cost(pos, target_pos):
 		target1 = target_pos.index(pod)
 		target2 = target_pos[target1 + 1:].index(pod) + target1 + 1
 
-		cost1 = distance(cell1, target1) + distance(cell2, target2)
-		cost2 = distance(cell2, target1) + distance(cell1, target2)
+		cost1 = distance(cell1, target1, room_size) + distance(
+			cell2, target2, room_size)
+		cost2 = distance(cell2, target1, room_size) + distance(
+			cell1, target2, room_size)
 		cost += min(cost1, cost2) * energy[pod]
 	return cost
 
 
+def h_cost_4(pos, target_pos):
+	# Returns an estimated cost to get from pos to target_pos.
+	assert (room_size == 4)
+	cost = 0
+	for pod in ['A', 'B', 'C', 'D']:
+		cell1 = pos.index(pod)
+		cell2 = pos[cell1 + 1:].index(pod) + cell1 + 1
+		cell3 = pos[cell2 + 1:].index(pod) + cell2 + 1
+		cell4 = pos[cell3 + 1:].index(pod) + cell3 + 1
+
+		target1 = target_pos.index(pod)
+		target2 = target_pos[target1 + 1:].index(pod) + target1 + 1
+		target3 = target_pos[target2 + 1:].index(pod) + target2 + 1
+		target4 = target_pos[target3 + 1:].index(pod) + target3 + 1
+
+		cost1_cells = [(cell1, target1), (cell2, target2),
+		               (cell3, target3), (cell4, target4)]
+		cost2_cells = [(cell2, target1), (cell3, target2),
+		               (cell4, target3), (cell1, target4)]
+		cost3_cells = [(cell3, target1), (cell4, target2),
+		               (cell1, target3), (cell2, target4)]
+		cost4_cells = [(cell4, target1), (cell1, target2),
+		               (cell2, target3), (cell3, target4)]
+
+		cost1 = sum(distance(c, t, room_size) for c, t in cost1_cells)
+		cost2 = sum(distance(c, t, room_size) for c, t in cost2_cells)
+		cost3 = sum(distance(c, t, room_size) for c, t in cost3_cells)
+		cost4 = sum(distance(c, t, room_size) for c, t in cost4_cells)
+		cost += min(cost1, cost2, cost3, cost4) * energy[pod]
+	return cost
+
+
 @lru_cache(maxsize=None)
-def distance(start_cell, end_cell):
+def distance(start_cell, end_cell, room_size):
 	# Returns the manhattan distance between two cells.
 	if start_cell == end_cell:
 		return 0
 
 	distance = 0
-	start_room = start_cell // 2 if start_cell < 8 else None
-	end_room = end_cell // 2 if end_cell < 8 else None
+	start_room = start_cell // room_size if start_cell < hall_start else None
+	end_room = end_cell // room_size if end_cell < hall_start else None
 
 	if start_room is not None:
 		if start_room == end_room:
 			return abs(end_cell - start_cell)
-		distance += 2 - (start_cell % 2)
-		enter_hall_cell = start_room * 2 + 10
+		distance += room_size - (start_cell % room_size)
+		enter_hall_cell = start_room * 2 + hall_start + 2
 	else:
 		enter_hall_cell = start_cell
 
 	if end_room is not None:
-		distance += 2 - (end_cell % 2)
-		exit_hall_cell = end_room * 2 + 10
+		distance += room_size - (end_cell % room_size)
+		exit_hall_cell = end_room * 2 + hall_start + 2
 	else:
 		exit_hall_cell = end_cell
 
@@ -182,9 +225,9 @@ def find_moves(pos):
 	# Returns a list of all valid moves from the given puzzle position.
 	# The moves are sorted by cost in ascending order.
 	moves = []
-	for room in range(0, 4):
-		for room_cell in range(0, 2):
-			start_cell = room * 2 + room_cell
+	for room in range(0, num_rooms):
+		for room_cell in range(0, room_size):
+			start_cell = room * room_size + room_cell
 			pod = pos[start_cell]
 			if pod == '.':
 				continue
@@ -193,7 +236,7 @@ def find_moves(pos):
 			if cost_to_hall is None:
 				continue
 
-			enter_hall_cell = room * 2 + 10
+			enter_hall_cell = room * 2 + hall_start + 2
 			find_moves_to_room(moves, pos, pod, start_cell, room, cost_to_hall,
 			                   enter_hall_cell)
 			find_moves_to_hall(moves, pos, pod, start_cell, cost_to_hall,
@@ -209,14 +252,14 @@ def find_moves(pos):
 
 
 def find_moves_to_room(moves, pos, pod, start_cell, start_room, cost_to_hall,
-	                     enter_hall_cell):
+                       enter_hall_cell):
 	# Adds moves from the start_cell to each valid target room cell.
-	for target_room in range(0, 4):
+	for target_room in range(0, num_rooms):
 		if start_room == target_room:
 			continue
 
-		for target_room_cell in range(0, 2):
-			target_cell = target_room * 2 + target_room_cell
+		for target_room_cell in range(0, room_size):
+			target_cell = target_room * room_size + target_room_cell
 			if not is_valid_room_target(pos, start_cell, target_cell):
 				continue
 
@@ -224,7 +267,7 @@ def find_moves_to_room(moves, pos, pod, start_cell, start_room, cost_to_hall,
 			if cost_from_hall is None:
 				continue
 
-			exit_hall_cell = target_room * 2 + 10
+			exit_hall_cell = target_room * 2 + hall_start + 2
 			cost_in_hall = cost_from_hall_to_hall(pos, enter_hall_cell, exit_hall_cell)
 			if cost_in_hall is None:
 				continue
@@ -234,7 +277,7 @@ def find_moves_to_room(moves, pos, pod, start_cell, start_room, cost_to_hall,
 
 
 def find_moves_to_hall(moves, pos, pod, start_cell, cost_to_hall,
-																							enter_hall_cell):
+                       enter_hall_cell):
 	# Adds moves from the start_cell to each valid target hall cell.
 	for target_cell in hall_cells:
 		cost_in_hall = cost_from_hall_to_hall(pos, enter_hall_cell, target_cell)
@@ -248,11 +291,11 @@ def find_moves_to_hall(moves, pos, pod, start_cell, cost_to_hall,
 def cost_from_room_to_hall(pos, room, room_cell):
 	# Returns the cost of moving from a room to the hall entry way for the room
 	# or None if the move is not valid.
-	assert (room < 4)
-	assert (room_cell < 2)
+	assert (room < num_rooms)
+	assert (room_cell < room_size)
 	cost = 1
-	for cell in range(room_cell + 1, 2):
-		if pos[room * 2 + cell] != '.':
+	for cell in range(room_cell + 1, room_size):
+		if pos[room * room_size + cell] != '.':
 			return None
 		cost += 1
 	return cost
@@ -261,11 +304,11 @@ def cost_from_room_to_hall(pos, room, room_cell):
 def cost_from_hall_to_room(pos, room, room_cell):
 	# Returns the cost of moving into a room or None if the move is not valid.
 	# The starting point is the hall entry way to the room.
-	assert (room < 4)
-	assert (room_cell < 2)
+	assert (room < num_rooms)
+	assert (room_cell < room_size)
 	cost = 0
-	for cell in range(1, room_cell - 1, -1):
-		if pos[room * 2 + cell] != '.':
+	for cell in range(room_size - 1, room_cell - 1, -1):
+		if pos[room * room_size + cell] != '.':
 			return None
 		cost += 1
 	return cost
@@ -274,8 +317,8 @@ def cost_from_hall_to_room(pos, room, room_cell):
 def cost_from_hall_to_hall(pos, start, target):
 	# Returns the cost of moving from one hall cell to another hall cell
 	# or None if the move is not valid.
-	assert (start >= 8)
-	assert (target >= 8)
+	assert (start >= hall_start)
+	assert (target >= hall_start)
 	if start == target:
 		return None
 	cost = 0
@@ -290,17 +333,23 @@ def cost_from_hall_to_hall(pos, start, target):
 
 def is_valid_room_target(pos, start, target):
 	# Returns true if the target is a valid room cell for the pod in the start cell.
-	assert (target < 8)
+	assert (target < hall_start)
 	pod = pos[start]
-	target_room = target // 2
+	target_room = target // room_size
 	pod_room = ord(pod) - ord('A')
 	if target_room != pod_room:
 		return False
-	if pos[target_room * 2 + 1] != '.':
-		return False
-	if target == target_room * 2 + 1:
-		return pos[target_room * 2] == pod
-	return pos[target_room * 2] == '.'
+	room_end = target_room * room_size
+	room_entry = room_end + room_size - 1
+	# room must be empty up to and including the target cell.
+	for cell in range(room_entry, target - 1, -1):
+		if pos[cell] != '.':
+			return False
+	# the remaining room cells must not have any other pods.
+	for cell in range(target - 1, room_end - 1, -1):
+		if (pos[cell] != '.') and (pos[cell] != pod):
+			return False
+	return True
 
 
 def make_move(pos, cell, target):
@@ -311,10 +360,21 @@ def make_move(pos, cell, target):
 	return ''.join(move)
 
 
-start_time = perf_counter()
+def set_room_size(size):
+	global room_size, num_rooms, hall_start, pos_length, hall_cells, end_pos
+	room_size = size
+	num_rooms = 4
+	hall_start = num_rooms * room_size
+	pos_length = hall_start + 11
+	# Valid hall stopping locations.
+	hall_cells = [
+		hall_start, hall_start + 1, hall_start + 3, hall_start + 5, hall_start + 7,
+		hall_start + 9, hall_start + 10
+	]
+	# Puzzle solution.
+	end_pos = ('A' * size) + ('B' * size) + ('C' * size) + ('D' * size)
+	end_pos += ('.' * 11)
 
-# Valid hall stopping locations.
-hall_cells = [8, 9, 11, 13, 15, 17, 18]
 
 # Energy cost per move for each amphipod.
 energy = {'A': 1, 'B': 10, 'C': 100, 'D': 1000}
@@ -322,15 +382,30 @@ energy = {'A': 1, 'B': 10, 'C': 100, 'D': 1000}
 # Puzzle solution.
 end_pos = "AABBCCDD..........."
 
+
+# Part 1
+
+start_time = perf_counter()
+
+set_room_size(2)
 start_pos = parse_puzzle(read_file("input.txt"))
-
-path, cost = find_path_astar(start_pos, end_pos)
-#for pos, pos_cost in path:
-#	pretty_print(pos)
-#	print(f"cost = {pos_cost}")	
-#	print()
-
+assert (len(start_pos) == pos_length)
+_, cost = find_path_astar(start_pos, end_pos, h_cost_2)
 print(f"Part 1: {cost}")
+
+duration = perf_counter() - start_time
+print(f"Completed in {duration:.3f} seconds")
+
+
+# Part 2
+
+start_time = perf_counter()
+
+set_room_size(4)
+start_pos = parse_puzzle(read_file("input_2.txt"))
+assert (len(start_pos) == pos_length)
+_, cost = find_path_astar(start_pos, end_pos, h_cost_4)
+print(f"Part 2: {cost}")
 
 duration = perf_counter() - start_time
 print(f"Completed in {duration:.3f} seconds")
